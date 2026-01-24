@@ -22,6 +22,7 @@ import { PostsModule } from './posts/posts.module';
 import { PredictionsModule } from './predictions/predictions.module';
 import { validate } from './common/config/env.validation';
 import { BlockchainModule } from './blockchain/blockchain.module';
+import { LeaderboardsModule } from './leaderboards/leaderboards.module';
 
 @Module({
   imports: [
@@ -67,6 +68,7 @@ import { BlockchainModule } from './blockchain/blockchain.module';
     PlayerCardMetadataModule,
     PostsModule,
     PredictionsModule,
+    LeaderboardsModule,
   ],
   controllers: [],
   providers: [
