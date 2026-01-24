@@ -5,6 +5,7 @@ import {
   ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
+import { EventBus } from '@nestjs/cqrs';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Bet, BetStatus } from './entities/bet.entity';
@@ -21,6 +22,10 @@ import {
   TransactionType,
   TransactionStatus,
 } from '../transactions/entities/transaction.entity';
+import {
+  BetPlacedEvent,
+  BetSettledEvent,
+} from '../leaderboard/domain/events';
 
 export interface PaginatedBets {
   data: Bet[];
@@ -39,6 +44,7 @@ export class BetsService {
     private readonly matchRepository: Repository<Match>,
     private readonly dataSource: DataSource,
     private readonly walletService: WalletService,
+    private readonly eventBus: EventBus,
   ) {}
 
   /**
@@ -133,6 +139,16 @@ export class BetsService {
       }
 
       await queryRunner.commitTransaction();
+
+      // Emit BetPlacedEvent for leaderboard updates
+      this.eventBus.publish(
+        new BetPlacedEvent(
+          userId,
+          createBetDto.matchId,
+          Number(createBetDto.stakeAmount),
+          createBetDto.predictedOutcome,
+        ),
+      );
 
       return savedBet;
     } catch (error) {
@@ -330,14 +346,19 @@ export class BetsService {
       let won = 0;
       let lost = 0;
       let totalPayout = 0;
+      const settledBetEvents: BetSettledEvent[] = [];
 
       // Settle each bet
       for (const bet of pendingBets) {
-        if (bet.predictedOutcome === match.outcome) {
+        const isWin = bet.predictedOutcome === match.outcome;
+        let winningsAmount = 0;
+
+        if (isWin) {
           // Winner - distribute payout
           bet.status = BetStatus.WON;
           won++;
           totalPayout += Number(bet.potentialPayout);
+          winningsAmount = Number(bet.potentialPayout);
 
           // Credit winnings to user wallet
           await this.walletService.updateUserBalance(
@@ -358,9 +379,27 @@ export class BetsService {
         }
         bet.settledAt = new Date();
         await queryRunner.manager.save(bet);
+
+        // Prepare event for emission after transaction
+        settledBetEvents.push(
+          new BetSettledEvent(
+            bet.userId,
+            bet.id,
+            matchId,
+            isWin,
+            Number(bet.stakeAmount),
+            winningsAmount,
+            0, // Accuracy will be calculated by leaderboard service
+          ),
+        );
       }
 
       await queryRunner.commitTransaction();
+
+      // Emit BetSettledEvents for leaderboard updates (after transaction commits)
+      settledBetEvents.forEach((event) => {
+        this.eventBus.publish(event);
+      });
 
       return {
         settled: pendingBets.length,

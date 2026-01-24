@@ -11,6 +11,7 @@ import { Match } from './matches/entities/match.entity';
 import { Bet } from './bets/entities/bet.entity';
 import { PlayerCardMetadata } from './player-card-metadata/entities/player-card-metadata.entity';
 import { Prediction } from './predictions/entities/prediction.entity';
+import { Leaderboard } from './leaderboard/entities/leaderboard.entity';
 import configuration from './config/configuration';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
@@ -20,6 +21,8 @@ import { MatchesModule } from './matches/matches.module';
 import { PlayerCardMetadataModule } from './player-card-metadata/player-card-metadata.module';
 import { PostsModule } from './posts/posts.module';
 import { PredictionsModule } from './predictions/predictions.module';
+import { StakingModule } from './staking/staking.module';
+import { LeaderboardModule } from './leaderboard/leaderboard.module';
 import { validate } from './common/config/env.validation';
 import { BlockchainModule } from './blockchain/blockchain.module';
 
@@ -59,6 +62,7 @@ import { BlockchainModule } from './blockchain/blockchain.module';
       Bet,
       PlayerCardMetadata,
       Prediction,
+      Leaderboard,
     ]),
     AuthModule,
     BlockchainModule,
@@ -67,6 +71,8 @@ import { BlockchainModule } from './blockchain/blockchain.module';
     PlayerCardMetadataModule,
     PostsModule,
     PredictionsModule,
+    StakingModule,
+    LeaderboardModule,
   ],
   controllers: [],
   providers: [
