@@ -56,8 +56,8 @@ export class PostsService {
   async findPublished(): Promise<Post[]> {
     return this.postRepository.find({
       where: { status: PostStatus.PUBLISHED },
-      relations: ['author'],
-      order: { createdAt: 'DESC' },
+      relations: ['author', 'categories'],
+      order: { createdAt: 'DESC' as any },
     });
   }
 }
