@@ -41,10 +41,7 @@ export class BetsService {
     private readonly matchRepository: Repository<Match>,
     private readonly dataSource: DataSource,
     private readonly walletService: WalletService,
-
     private readonly leaderboardService: LeaderboardService,
-  ) { }
-
     private readonly freeBetVoucherService: FreeBetVoucherService,
   ) {}
 
@@ -168,6 +165,16 @@ export class BetsService {
       }
 
       await queryRunner.commitTransaction();
+
+      // Emit BetPlacedEvent for leaderboard updates
+      this.eventBus.publish(
+        new BetPlacedEvent(
+          userId,
+          createBetDto.matchId,
+          Number(createBetDto.stakeAmount),
+          createBetDto.predictedOutcome,
+        ),
+      );
 
       return savedBet;
     } catch (error) {
@@ -373,14 +380,19 @@ export class BetsService {
       let won = 0;
       let lost = 0;
       let totalPayout = 0;
+      const settledBetEvents: BetSettledEvent[] = [];
 
       // Settle each bet
       for (const bet of pendingBets) {
-        if (bet.predictedOutcome === match.outcome) {
+        const isWin = bet.predictedOutcome === match.outcome;
+        let winningsAmount = 0;
+
+        if (isWin) {
           // Winner - distribute payout
           bet.status = BetStatus.WON;
           won++;
           totalPayout += Number(bet.potentialPayout);
+          winningsAmount = Number(bet.potentialPayout);
 
           // Credit winnings to user wallet
           await this.walletService.updateUserBalance(
@@ -401,10 +413,29 @@ export class BetsService {
         }
         bet.settledAt = new Date();
         await queryRunner.manager.save(bet);
+
+        // Prepare event for emission after transaction
+        settledBetEvents.push(
+          new BetSettledEvent(
+            bet.userId,
+            bet.id,
+            matchId,
+            isWin,
+            Number(bet.stakeAmount),
+            winningsAmount,
+            0, // Accuracy will be calculated by leaderboard service
+          ),
+        );
       }
 
       await queryRunner.commitTransaction();
 
+<<<<<<< HEAD
+      // Emit BetSettledEvents for leaderboard updates (after transaction commits)
+      settledBetEvents.forEach((event) => {
+        this.eventBus.publish(event);
+      });
+=======
       // Update leaderboard stats for all settled bets
       // We run this without awaiting to not block the response, or await if we want to ensure consistency before return.
       // Given the requirement for efficiency, let's await it but handle errors so it doesn't crash.
@@ -415,6 +446,7 @@ export class BetsService {
           console.error(`Failed to update leaderboard for bet ${bet.id}`, e);
         }
       }
+>>>>>>> upstream/main
 
       return {
         settled: pendingBets.length,

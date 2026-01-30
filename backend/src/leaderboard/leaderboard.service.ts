@@ -1,125 +1,287 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
-import { LeaderboardStats, LeaderboardPeriod } from './entities/leaderboard-stats.entity';
-import { Bet, BetStatus } from '../bets/entities/bet.entity';
-import * as moment from 'moment';
+import { Leaderboard } from './entities/leaderboard.entity';
+import { User } from '../users/entities/user.entity';
+import {
+  BetPlacedEvent,
+  BetSettledEvent,
+  StakeCreditedEvent,
+  StakeDebitedEvent,
+} from './domain/events';
 
+/**
+ * LeaderboardService handles atomic updates to leaderboard statistics
+ * All operations are transaction-aware to ensure consistency
+ */
 @Injectable()
 export class LeaderboardService {
-    constructor(
-        @InjectRepository(LeaderboardStats)
-        private readonly statsRepository: Repository<LeaderboardStats>,
-        private readonly dataSource: DataSource,
-    ) { }
+  private readonly logger = new Logger(LeaderboardService.name);
 
-    /**
-     * Updates leaderboard stats for a user after a bet is settled.
-     * This should be called transactionally or be idempotent.
-     */
-    async updateStatsAfterBetSettlement(bet: Bet) {
-        if (bet.status !== BetStatus.WON && bet.status !== BetStatus.LOST) {
-            return; // Only process settled bets
-        }
+  constructor(
+    @InjectRepository(Leaderboard)
+    private readonly leaderboardRepository: Repository<Leaderboard>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+    private readonly dataSource: DataSource,
+  ) {}
 
-        const periods = this.getPeriodsForDate(bet.settledAt || new Date());
+  /**
+   * Initialize or retrieve leaderboard for a user
+   * Creates entry if not exists
+   */
+  async ensureLeaderboardExists(userId: string): Promise<Leaderboard> {
+    let leaderboard = await this.leaderboardRepository.findOne({
+      where: { userId },
+    });
 
-        // Execute updates for all periods within a transaction to ensure consistency
-        await this.dataSource.transaction(async (manager) => {
-            const statsRepo = manager.getRepository(LeaderboardStats);
+    if (!leaderboard) {
+      leaderboard = this.leaderboardRepository.create({
+        userId,
+      });
+      await this.leaderboardRepository.save(leaderboard);
+      this.logger.log(`Created leaderboard for user ${userId}`);
+    }
 
-            for (const p of periods) {
-                await this.upsertAndCalculate(statsRepo, bet, p.period, p.id);
-            }
+    return leaderboard;
+  }
+
+  /**
+   * Handle bet placed event
+   * Updates activity tracking
+   */
+  async handleBetPlaced(event: BetPlacedEvent): Promise<void> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const leaderboard = await queryRunner.manager.findOne(Leaderboard, {
+        where: { userId: event.userId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!leaderboard) {
+        const newLeaderboard = queryRunner.manager.create(Leaderboard, {
+          userId: event.userId,
         });
+        await queryRunner.manager.save(newLeaderboard);
+      } else {
+        leaderboard.lastBetAt = event.timestamp;
+        await queryRunner.manager.save(leaderboard);
+      }
+
+      await queryRunner.commitTransaction();
+      this.logger.debug(
+        `Updated leaderboard for bet placed event - User: ${event.userId}`,
+      );
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      this.logger.error(
+        `Failed to handle bet placed event for user ${event.userId}:`,
+        error,
+      );
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  /**
+   * Handle bet settled event
+   * Updates betting stats, accuracy, and winning streak atomically
+   */
+  async handleBetSettled(event: BetSettledEvent): Promise<void> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const leaderboard = await queryRunner.manager.findOne(Leaderboard, {
+        where: { userId: event.userId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!leaderboard) {
+        throw new Error(
+          `Leaderboard not found for user ${event.userId} during bet settlement`,
+        );
+      }
+
+      // Update total bets
+      leaderboard.totalBets++;
+
+      // Update win/loss stats
+      if (event.isWin) {
+        leaderboard.betsWon++;
+        leaderboard.totalWinnings += event.winningsAmount;
+      } else {
+        leaderboard.betsLost++;
+      }
+
+      // Update accuracy (only on settlement, not on placement)
+      leaderboard.recalculateAccuracy();
+
+      // Update winning streak
+      leaderboard.updateWinningStreak(event.isWin);
+
+      await queryRunner.manager.save(leaderboard);
+
+      await queryRunner.commitTransaction();
+      this.logger.log(
+        `Updated leaderboard for bet settlement - User: ${event.userId}, Win: ${event.isWin}, ` +
+          `Accuracy: ${leaderboard.bettingAccuracy}%, Streak: ${leaderboard.winningStreak}`,
+      );
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      this.logger.error(
+        `Failed to handle bet settled event for user ${event.userId}:`,
+        error,
+      );
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  /**
+   * Handle stake credited event
+   * Updates staking stats atomically
+   */
+  async handleStakeCredited(event: StakeCreditedEvent): Promise<void> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const leaderboard = await queryRunner.manager.findOne(Leaderboard, {
+        where: { userId: event.userId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!leaderboard) {
+        throw new Error(
+          `Leaderboard not found for user ${event.userId} during stake credit`,
+        );
+      }
+
+      leaderboard.totalStakingRewards += event.rewardAmount;
+      leaderboard.lastStakeAt = event.timestamp;
+
+      await queryRunner.manager.save(leaderboard);
+
+      await queryRunner.commitTransaction();
+      this.logger.log(
+        `Updated leaderboard for stake credited - User: ${event.userId}, ` +
+          `Reward: ${event.rewardAmount}`,
+      );
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      this.logger.error(
+        `Failed to handle stake credited event for user ${event.userId}:`,
+        error,
+      );
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  /**
+   * Handle stake debited event
+   * Updates staking stats atomically
+   */
+  async handleStakeDebited(event: StakeDebitedEvent): Promise<void> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const leaderboard = await queryRunner.manager.findOne(Leaderboard, {
+        where: { userId: event.userId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!leaderboard) {
+        throw new Error(
+          `Leaderboard not found for user ${event.userId} during stake debit`,
+        );
+      }
+
+      // Only deduct from activeStakes if it was an active stake
+      if (event.reason === 'unstake') {
+        leaderboard.activeStakes -= event.stakedAmount;
+      }
+
+      leaderboard.lastStakeAt = event.timestamp;
+
+      await queryRunner.manager.save(leaderboard);
+
+      await queryRunner.commitTransaction();
+      this.logger.log(
+        `Updated leaderboard for stake debited - User: ${event.userId}, ` +
+          `Amount: ${event.stakedAmount}, Reason: ${event.reason}`,
+      );
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      this.logger.error(
+        `Failed to handle stake debited event for user ${event.userId}:`,
+        error,
+      );
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  /**
+   * Get user's leaderboard stats
+   */
+  async getLeaderboardStats(userId: string): Promise<Leaderboard | null> {
+    return this.leaderboardRepository.findOne({
+      where: { userId },
+      relations: ['user'],
+    });
+  }
+
+  /**
+   * Get top leaderboard entries
+   */
+  async getTopLeaderboard(
+    limit: number = 100,
+    offset: number = 0,
+    orderBy:
+      | 'totalWinnings'
+      | 'bettingAccuracy'
+      | 'winningStreak' = 'totalWinnings',
+  ): Promise<Leaderboard[]> {
+    const query = this.leaderboardRepository
+      .createQueryBuilder('leaderboard')
+      .leftJoinAndSelect('leaderboard.user', 'user')
+      .select([
+        'leaderboard.id',
+        'leaderboard.userId',
+        'leaderboard.totalWinnings',
+        'leaderboard.bettingAccuracy',
+        'leaderboard.winningStreak',
+        'leaderboard.totalBets',
+        'leaderboard.betsWon',
+        'leaderboard.betsLost',
+        'user.id',
+        'user.username',
+        'user.email',
+      ]);
+
+    if (orderBy === 'totalWinnings') {
+      query.orderBy('leaderboard.totalWinnings', 'DESC');
+    } else if (orderBy === 'bettingAccuracy') {
+      query
+        .where('leaderboard.totalBets > :minBets', { minBets: 10 })
+        .orderBy('leaderboard.bettingAccuracy', 'DESC');
+    } else if (orderBy === 'winningStreak') {
+      query.orderBy('leaderboard.winningStreak', 'DESC');
     }
 
-    private getPeriodsForDate(date: Date): { period: LeaderboardPeriod; id: string }[] {
-        const m = moment(date);
-        return [
-            { period: LeaderboardPeriod.ALL_TIME, id: 'GLOBAL' },
-            { period: LeaderboardPeriod.MONTHLY, id: m.format('YYYY-MM') },
-            { period: LeaderboardPeriod.WEEKLY, id: m.format('YYYY-[W]WW') },
-        ];
-    }
-
-    private async upsertAndCalculate(
-        repo: Repository<LeaderboardStats>,
-        bet: Bet,
-        period: LeaderboardPeriod,
-        timeframeId: string,
-    ) {
-        // 1. Find existing stats or create new
-        let stats = await repo.findOne({
-            where: { userId: bet.userId, period, timeframeId },
-        });
-
-        if (!stats) {
-            stats = repo.create({
-                userId: bet.userId,
-                period,
-                timeframeId,
-                totalStaked: 0,
-                totalNetEarnings: 0,
-                totalWon: 0,
-                totalLost: 0,
-                totalSettled: 0,
-                currentStreak: 0,
-                longestStreak: 0,
-            });
-        }
-
-        // 2. Calculate Deltas
-        // Note: JS numbers have precision issues. For production finance, use a library like decimal.js.
-        // Here we assume standard number behavior for simplicity as per the current codebase style.
-        const stake = Number(bet.stakeAmount);
-        const payout = Number(bet.potentialPayout);
-
-        // Net Earnings:
-        // If WON: (Payout - Stake)
-        // If LOST: (-Stake)
-        const earningsDelta = bet.status === BetStatus.WON ? (payout - stake) : -stake;
-
-        // 3. Update Counts and Amounts
-        stats.totalStaked = Number(stats.totalStaked) + stake;
-        stats.totalNetEarnings = Number(stats.totalNetEarnings) + earningsDelta;
-        stats.totalSettled += 1;
-
-        if (bet.status === BetStatus.WON) {
-            stats.totalWon += 1;
-            stats.currentStreak += 1;
-        } else {
-            stats.totalLost += 1;
-            stats.currentStreak = 0; // Reset streak on loss
-        }
-
-        // Update longest streak
-        if (stats.currentStreak > stats.longestStreak) {
-            stats.longestStreak = stats.currentStreak;
-        }
-
-        stats.lastUpdated = new Date();
-
-        await repo.save(stats);
-    }
-
-    /**
-     * Retrieves the leaderboard for a specific period.
-     */
-    async getLeaderboard(period: LeaderboardPeriod, timeframeId?: string, limit: number = 50) {
-        if (!timeframeId) {
-            // Default to current timeframe if not provided
-            const m = moment();
-            if (period === LeaderboardPeriod.MONTHLY) timeframeId = m.format('YYYY-MM');
-            else if (period === LeaderboardPeriod.WEEKLY) timeframeId = m.format('YYYY-[W]WW');
-            else timeframeId = 'GLOBAL';
-        }
-
-        return this.statsRepository.find({
-            where: { period, timeframeId },
-            order: { totalNetEarnings: 'DESC' }, // Default ranking by earnings
-            take: limit,
-            relations: ['user'], // Include user profile data
-        });
-    }
+    return query.skip(offset).take(limit).getMany();
+  }
 }

@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { LeaderboardQueryService } from './leaderboard-query.service';
 import { LeaderboardType } from './leaderboard-type.enum';
 
