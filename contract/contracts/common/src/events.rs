@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Symbol};
+use soroban_sdk::{contracttype, Address, Symbol, BytesN};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -21,4 +21,12 @@ pub struct BetSettledEvent {
 pub struct BetCancelledEvent {
     pub bet_id: Symbol,
     pub reason: Symbol,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SpinExecutedEvent {
+    pub spin_id: BytesN<32>,
+    pub executor: Address,
+    pub timestamp: u64,
 }
