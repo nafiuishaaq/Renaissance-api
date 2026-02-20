@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec, U256, Symbol};
 
 mod errors;
 mod events;
@@ -11,6 +11,8 @@ pub use errors::*;
 pub use events::*;
 pub use storage::*;
 pub use token::*;
+
+use common::{NFTMintEvent, NFT_MINT_EVENT, create_nft_mint_event};
 
 #[contract]
 pub struct PlayerCardContract;
@@ -25,10 +27,19 @@ impl PlayerCardContract {
         
         storage::set_admin(&env, &admin);
         storage::set_next_token_id(&env, 1);
-        env.events().publish(
-            (String::from_str(&env, "initialized"), admin.clone()),
-            (),
-        );
+        
+        let event = NFTMintEvent {
+            token_id: U256::from_u32(&env, 0),
+            to: admin.clone(),
+            token_uri: String::from_str(&env, "contract_initialized"),
+            nft_contract: env.current_contract_address(),
+            timestamp: env.ledger().timestamp(),
+            mint_type: Symbol::short("INIT"),
+            metadata: soroban_sdk::Map::new(&env),
+            price: None,
+        };
+        
+        env.events().publish((NFT_MINT_EVENT,), event);
     }
 
     /// Mint a new player card NFT to the specified recipient
@@ -42,10 +53,20 @@ impl PlayerCardContract {
         storage::set_owner(&env, token_id, &to);
         storage::set_token_uri(&env, token_id, &token_uri);
 
-        env.events().publish(
-            (String::from_str(&env, "mint"), token_id),
-            (to.clone(), token_uri.clone()),
+        let event = create_nft_mint_event(
+            &env,
+            U256::from_u32(&env, token_id as u32),
+            to.clone(),
+            token_uri.clone(),
+            env.current_contract_address(),
+            Symbol::short("PLAYER_CARD"),
+            None,
         );
+        
+        let mut event_with_timestamp = event;
+        event_with_timestamp.timestamp = env.ledger().timestamp();
+
+        env.events().publish((NFT_MINT_EVENT,), event_with_timestamp);
 
         token_id
     }
@@ -61,10 +82,18 @@ impl PlayerCardContract {
 
         storage::set_owner(&env, token_id, &to);
 
-        env.events().publish(
-            (String::from_str(&env, "transfer"), token_id),
-            (from.clone(), to.clone()),
-        );
+        let event = NFTMintEvent {
+            token_id: U256::from_u32(&env, token_id as u32),
+            to: to.clone(),
+            token_uri: storage::get_token_uri(&env, token_id),
+            nft_contract: env.current_contract_address(),
+            timestamp: env.ledger().timestamp(),
+            mint_type: Symbol::short("TRANSFER"),
+            metadata: soroban_sdk::Map::new(&env),
+            price: None,
+        };
+
+        env.events().publish((NFT_MINT_EVENT,), event);
     }
 
     /// Get the owner of a specific token
