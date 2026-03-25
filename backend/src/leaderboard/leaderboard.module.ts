@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Leaderboard } from './entities/leaderboard.entity';
@@ -18,6 +18,7 @@ import { SeasonService } from './services/season.service';
 import { SeasonalLeaderboardService } from './services/seasonal-leaderboard.service';
 import { SeasonResetService } from './services/season-reset.service';
 import { SeasonController } from './controllers/season.controller';
+import { BetsModule } from '../bets/bets.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { SeasonController } from './controllers/season.controller';
       SeasonalLeaderboard,
     ]),
     CqrsModule,
+    forwardRef(() => BetsModule),
   ],
   controllers: [LeaderboardController, SeasonController],
   providers: [

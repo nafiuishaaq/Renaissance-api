@@ -9,6 +9,7 @@ import { User } from '../users/entities/user.entity';
 import { Bet } from '../bets/entities/bet.entity';
 import { Match } from '../matches/entities/match.entity';
 import { Settlement } from '../blockchain/entities/settlement.entity';
+import { BlockchainModule } from '../blockchain/blockchain.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { Settlement } from '../blockchain/entities/settlement.entity';
       Settlement,
     ]),
     ConfigModule,
+    BlockchainModule,
   ],
   controllers: [ReconciliationController],
   providers: [ReconciliationService, ReconciliationScheduler],

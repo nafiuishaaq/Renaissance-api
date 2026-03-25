@@ -1,4 +1,5 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
+import { CqrsModule } from '@nestjs/cqrs';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BetsController } from './bets.controller';
 import { BetsService } from './bets.service';
@@ -13,7 +14,8 @@ import { RateLimitModule } from '../rate-limit/rate-limit.module';
 @Module({
   imports: [
     TypeOrmModule.forFeature([Bet, Match]),
-    LeaderboardModule,
+    forwardRef(() => LeaderboardModule),
+    CqrsModule,
     WalletModule,
     FreeBetVouchersModule,
     SpinModule,
