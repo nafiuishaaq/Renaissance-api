@@ -8,8 +8,14 @@ export async function GET(req: Request) {
   const offset = Number(url.searchParams.get('offset') || '0');
   const unreadOnly = url.searchParams.get('unreadOnly') === 'true';
 
-  if (!userId) return NextResponse.json({ error: 'missing userId' }, { status: 400 });
+  if (!userId)
+    return NextResponse.json({ error: 'missing userId' }, { status: 400 });
 
-  const notifications = await NotificationService.fetchNotifications(userId, limit, offset, unreadOnly);
+  const notifications = await NotificationService.fetchNotifications(
+    userId,
+    limit,
+    offset,
+    unreadOnly,
+  );
   return NextResponse.json({ notifications });
 }
