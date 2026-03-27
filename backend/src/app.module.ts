@@ -61,6 +61,7 @@ import { FraudModule } from './fraud/fraud.module';
 import { TeamsModule } from './teams/teams.module';
 import { PlayersModule } from './players/players.module';
 
+
 // Custom role-based guard
 import { RateLimitGuard } from './common/guards/rate-limit.guard';
 
@@ -111,6 +112,7 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
       UserAchievement,
       Team,
       Player,
+
     ]),
     SpinGameModule,
     RateLimitModule,
@@ -141,6 +143,7 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
     FraudModule,
     TeamsModule,
     PlayersModule,
+
   ],
   providers: [
     {
