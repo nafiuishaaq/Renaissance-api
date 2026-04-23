@@ -50,6 +50,7 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
 import { TreasuryModule } from './treasury/treasury.module';
 import { StakingModule } from './stake/staking.module';
 import { PlayerModule } from './player/player.module';
+import { DatabaseModule } from './database/database.module';
 
 @Module({
   imports: [
@@ -96,6 +97,7 @@ import { PlayerModule } from './player/player.module';
       Team,
       Comment,
     ]),
+    DatabaseModule,
     RateLimitModule,
     AuthModule,
     MatchesModule,
