@@ -12,6 +12,7 @@ import { Bet } from './bets/entities/bet.entity';
 import { PlayerCardMetadata } from './player-card-metadata/entities/player-card-metadata.entity';
 import { Prediction } from './predictions/entities/prediction.entity';
 import { FreeBetVoucher } from './free-bet-vouchers/entities/free-bet-voucher.entity';
+import { Comment } from './comments/entities/comment.entity';
 import configuration from './config/configuration';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
@@ -21,6 +22,7 @@ import { PlayerCardMetadataModule } from './player-card-metadata/player-card-met
 import { PostsModule } from './posts/posts.module';
 import { PredictionsModule } from './predictions/predictions.module';
 import { FreeBetVouchersModule } from './free-bet-vouchers/free-bet-vouchers.module';
+import { CommentsModule } from './comments/comments.module';
 import { validate } from './common/config/env.validation';
 import { LeaderboardModule } from './leaderboard/leaderboard.module';
 import { LeaderboardsModule } from './leaderboards/leaderboards.module';
@@ -92,6 +94,7 @@ import { PlayerModule } from './player/player.module';
       Achievement,
       UserAchievement,
       Team,
+      Comment,
     ]),
     RateLimitModule,
     AuthModule,
@@ -101,6 +104,7 @@ import { PlayerModule } from './player/player.module';
     LeaderboardModule,
     FreeBetVouchersModule,
     LeaderboardsModule,
+    CommentsModule,
     UsersModule,
     HealthModule,
     CacheConfigModule,
