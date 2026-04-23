@@ -8,6 +8,9 @@ import { User } from '../users/entities/user.entity';
 import { CqrsModule } from '@nestjs/cqrs';
 import { AchievementUnlockedNotificationHandler } from './handlers/achievement-unlocked.handler';
 import { LeaderboardModule } from '../leaderboard/leaderboard.module';
+import { NotificationDeliveryService } from './notification-delivery.service';
+import { ConfigModule } from '@nestjs/config';
+import { NotificationEntity } from './entities/notification.entity';
 
 /**
  * Notifications Module
@@ -15,12 +18,18 @@ import { LeaderboardModule } from '../leaderboard/leaderboard.module';
  * Provides event queue for scalable notification processing
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([User]), CqrsModule, LeaderboardModule],
+  imports: [
+    TypeOrmModule.forFeature([User, NotificationEntity]),
+    CqrsModule,
+    LeaderboardModule,
+    ConfigModule,
+  ],
   controllers: [NotificationsController],
   providers: [
     NotificationsService,
     NotificationsGateway,
     NotificationIntegrationService,
+    NotificationDeliveryService,
     AchievementUnlockedNotificationHandler,
   ],
   exports: [
