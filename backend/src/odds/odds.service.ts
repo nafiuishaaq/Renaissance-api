@@ -2,11 +2,17 @@ import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { HttpService } from '@nestjs/axios';
 import type { Cache } from 'cache-manager';
 import { Repository } from 'typeorm';
+import { firstValueFrom } from 'rxjs';
 import { Bet, BetStatus } from '../bets/entities/bet.entity';
 import { CacheInvalidationService } from '../common/cache/cache-invalidation.service';
-import { Match, MatchOutcome, MatchStatus } from '../matches/entities/match.entity';
+import {
+  Match,
+  MatchOutcome,
+  MatchStatus,
+} from '../matches/entities/match.entity';
 import { UpdateMatchOddsDto } from './dto/update-match-odds.dto';
 import {
   MatchOddsHistory,
@@ -42,11 +48,13 @@ export class OddsService {
     private readonly cacheManager: Cache,
     private readonly cacheInvalidationService: CacheInvalidationService,
     private readonly oddsRealtimeService: OddsRealtimeService,
+    private readonly httpService: HttpService,
   ) {}
 
   async getOddsSnapshot(matchId: string): Promise<Record<string, unknown>> {
     const cacheKey = this.getCacheKey(matchId);
-    const cached = await this.cacheManager.get<Record<string, unknown>>(cacheKey);
+    const cached =
+      await this.cacheManager.get<Record<string, unknown>>(cacheKey);
     if (cached) {
       return cached;
     }
@@ -57,7 +65,10 @@ export class OddsService {
     return snapshot;
   }
 
-  async getOddsHistory(matchId: string, limit: number = 50): Promise<MatchOddsHistory[]> {
+  async getOddsHistory(
+    matchId: string,
+    limit: number = 50,
+  ): Promise<MatchOddsHistory[]> {
     return this.oddsHistoryRepository.find({
       where: { matchId },
       order: { createdAt: 'DESC' },
@@ -402,5 +413,50 @@ export class OddsService {
     }
 
     return match;
+  }
+
+  async fetchExternalOdds(
+    matchId: string,
+    primaryUrl: string,
+    fallbackUrl?: string,
+  ): Promise<OddsValues> {
+    const attemptFetch = async (url: string): Promise<OddsValues> => {
+      const response = await firstValueFrom(
+        this.httpService.get<OddsValues>(url, { timeout: 5000 }),
+      );
+      const data = response.data as OddsValues;
+      return {
+        homeOdds: this.clampOdds(data.homeOdds),
+        drawOdds: this.clampOdds(data.drawOdds),
+        awayOdds: this.clampOdds(data.awayOdds),
+      };
+    };
+
+    try {
+      return await attemptFetch(primaryUrl);
+    } catch (primaryError) {
+      this.logger.warn(
+        `Primary odds fetch failed for match ${matchId}: ${
+          primaryError instanceof Error ? primaryError.message : 'unknown error'
+        }${fallbackUrl ? ', trying fallback' : ''}`,
+      );
+
+      if (fallbackUrl) {
+        try {
+          return await attemptFetch(fallbackUrl);
+        } catch (fallbackError) {
+          this.logger.warn(
+            `Fallback odds fetch failed for match ${matchId}: ${
+              fallbackError instanceof Error
+                ? fallbackError.message
+                : 'unknown error'
+            }`,
+          );
+        }
+      }
+
+      const match = await this.findMatch(matchId);
+      return this.extractOdds(match);
+    }
   }
 }

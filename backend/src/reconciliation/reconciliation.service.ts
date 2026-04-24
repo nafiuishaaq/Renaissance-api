@@ -98,36 +98,42 @@ export class ReconciliationService {
    * Pull on-chain balances from Soroban contracts
    */
   private async getOnChainBalances(): Promise<Record<string, number>> {
-    try {
-      // This would call the actual balance_ledger contract
-      // For now, we'll simulate with mock data
-      // In a real implementation, this would:
-      // 1. Call balance_ledger.get_total() for each user
-      // 2. Parse the returned XDR values
-      // 3. Convert to decimal representation
+    const users = await this.userRepository.find();
+    const onChainBalances: Record<string, number> = {};
 
-      this.logger.log('Fetching on-chain balances from Soroban contracts...');
-
-      // Mock implementation - in real scenario this would call:
-      // await this.sorobanService.invokeContract('get_total', [userAddress])
-
-      const users = await this.userRepository.find();
-      const onChainBalances: Record<string, number> = {};
-
-      // Simulate fetching from blockchain
-      for (const user of users) {
-        // In real implementation, this would be:
-        // const balance = await this.sorobanService.getBalance(user.walletAddress);
-        // onChainBalances[user.id] = this.convertXdrToDecimal(balance);
-        onChainBalances[user.id] = user.walletBalance; // Mock - using backend balance
+    for (const user of users) {
+      if (!user.stellarAddress) continue;
+      
+      try {
+        // Call Soroban contract to get real on-chain balance
+        const txHash = await this.sorobanService.invokeContract('get_total', [
+          user.stellarAddress,
+        ]);
+        // In production, you would parse the transaction response to extract the balance
+        // For now, we get the transaction status to verify it succeeded
+        const txStatus = await this.sorobanService.getTransactionStatus(txHash);
+        
+        // Parse the return value from the transaction
+        if (
+          txStatus.status === 'SUCCESS' &&
+          txStatus.returnValue
+        ) {
+          onChainBalances[user.id] = Number(txStatus.returnValue) || 0;
+        } else {
+          this.logger.warn(
+            `Failed to get on-chain balance for user ${user.id}`,
+          );
+          onChainBalances[user.id] = 0;
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Error fetching on-chain balance for user ${user.id}:`,
+          error,
+        );
+        onChainBalances[user.id] = 0;
       }
-
-      this.logger.log(`Retrieved on-chain balances for ${users.length} users`);
-      return onChainBalances;
-    } catch (error) {
-      this.logger.error('Failed to fetch on-chain balances:', error);
-      throw error;
     }
+    return onChainBalances;
   }
 
   /**
